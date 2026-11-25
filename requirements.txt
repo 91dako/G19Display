@@ -1,0 +1,15 @@
+pyusb>=1.2.1
+libusb-package>=1.0.26
+psutil>=5.9
+hidapi>=0.14
+numpy>=1.26
+requests>=2.31
+pillow>=10
+icalendar>=5
+recurring-ical-events>=2
+playwright>=1.40
+winrt-runtime>=2
+winrt-Windows.Foundation>=2
+winrt-Windows.Foundation.Collections>=2
+winrt-Windows.Media.Control>=2
+winrt-Windows.Storage.Streams>=2

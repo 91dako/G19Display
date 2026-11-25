@@ -1,0 +1,30 @@
+{
+  "ansichten": [
+    {"name": "Uhr", "aktiv": true},
+    {"name": "Musik", "aktiv": true},
+    {"name": "Netzwerk", "aktiv": true},
+    {"name": "System", "aktiv": true},
+    {"name": "Wetter", "aktiv": true},
+    {"name": "Bilder", "aktiv": true},
+    {"name": "Kalender", "aktiv": true}
+  ],
+  "bilder_ordner": "C:\\Users\\<NAME>\\Pictures",
+  "bilder_intervall": 10,
+  "wetter": {
+    "ort": "Berlin",
+    "lat": 52.52,
+    "lon": 13.405
+  },
+  "kalender_url": "",
+  "helligkeit_setzen": false,
+  "helligkeit": 100,
+  "tastatur_farbe_setzen": false,
+  "tastatur_farbe": "#FFFFFF",
+  "whatsapp": {
+    "aktiv": false,
+    "dauer": 3,
+    "absender_anzeigen": true,
+    "text_anzeigen": false,
+    "fenster_sichtbar": false
+  }
+}

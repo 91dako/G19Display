@@ -1,0 +1,6 @@
+# Optional: Google-Kalender „Privatadresse im iCal-Format“
+# (Kalender öffnen → Einstellungen → Integration).
+# Die Adresse hier oder in der Einstellungs-App eintragen.
+# Nicht öffentlich teilen und diese Datei als kalender_url.txt speichern.
+#
+# https://calendar.google.com/calendar/ical/xxxxxxxx/private-xxxxxxxx/basic.ics

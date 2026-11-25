@@ -1,0 +1,33 @@
+# Persönliche Einstellungen, Kalender-Adresse und G-Tasten-Belegung
+einstellungen.json
+kalender_url.txt
+tasten.json
+
+# WhatsApp-Sitzung und Laufzeitdaten (Anmeldung, Nachrichten, Status)
+whatsapp_profil/
+whatsapp_event.json
+whatsapp_status.json
+whatsapp_login.lock
+
+# Protokolle und temporäre Dateien
+*.log
+*.tmp
+*.bak
+
+# Lokale Sicherungskopien (können persönliche Vorgabewerte enthalten)
+*_backup.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Editor / Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
