@@ -69,7 +69,7 @@ def procs(name):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("G19 Einstellungen"); self.geometry("760x700"); self.minsize(720, 640)
+        self.title("G19 Einstellungen"); self.geometry("820x760"); self.minsize(760, 680)
         ico = os.path.join(BASE, "g19_einstellungen.ico")
         if os.path.exists(ico):
             try: self.iconbitmap(ico)
@@ -216,11 +216,23 @@ class App(tk.Tk):
 
     # ---------- Stream Deck ----------
     def tab_deck(self, f):
-        ttk.Label(f, justify="left", wraplength=700, text=
-                  "Die oberen vier G-Tasten, so wie sie an der Tastatur sitzen: G1 und G7 in der ersten Reihe, "
-                  "G2 und G8 darunter. Auf dem Display erscheint das, sobald die Ansicht „Stream Deck“ gewählt ist. "
-                  "Die Aktionen gelten nur dort. Die übrigen G-Tasten behalten ihre normale Belegung.").pack(anchor="w")
-        grid = ttk.Frame(f); grid.pack(fill="both", expand=True, pady=(8, 0))
+        canvas = tk.Canvas(f, highlightthickness=0, borderwidth=0)
+        scroll = ttk.Scrollbar(f, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win, width=max(e.width, 1)))
+        def wheel(e): canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        ttk.Label(inner, justify="left", wraplength=740, text=
+                  "Hier legst du fest, was die vier oberen G-Tasten tun.\n"
+                  "Das gilt, sobald auf dem Display die Ansicht „Stream Deck“ offen ist. "
+                  "G1 und G7 sind die erste Reihe, G2 und G8 die Reihe darunter. "
+                  "Die übrigen G-Tasten behalten ihre Belegung aus dem Reiter „G-Tasten“.").pack(anchor="w", fill="x", padx=2)
         slots = g19_deck.normalize(self.cfg.get("streamdeck"))
         self.deck_vars = []
         icons = [i[1] for i in g19_deck.ICONS]
@@ -234,40 +246,43 @@ class App(tk.Tk):
                  "wert": tk.StringVar(value=slot["wert"]),
                  "preset": tk.StringVar(value="Vorlage wählen …")}
             self.deck_vars.append(v)
-            card = ttk.LabelFrame(grid, text=f"{slot['taste']}  ·  {g19_deck.ORT[slot['taste']]}", padding=8)
-            card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=4, pady=4)
-            ttk.Label(card, text="Vorlage").grid(row=0, column=0, sticky="w", pady=2)
-            pcb = ttk.Combobox(card, textvariable=v["preset"], values=presets, state="readonly", width=24)
-            pcb.grid(row=0, column=1, columnspan=3, sticky="we", pady=2)
+            card = ttk.LabelFrame(inner, text=f"{slot['taste']}  ·  {g19_deck.ORT[slot['taste']]}", padding=8)
+            card.pack(fill="x", padx=2, pady=6)
+            v["summary"] = ttk.Label(card, text="", font=("Segoe UI", 10, "bold"))
+            v["summary"].grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
+            ttk.Label(card, text="Was soll sie machen?").grid(row=1, column=0, sticky="w", pady=2)
+            acb = ttk.Combobox(card, textvariable=v["aktion"], values=actions, state="readonly", width=28)
+            acb.grid(row=1, column=1, columnspan=3, sticky="we", pady=2)
+            acb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_sync(i))
+            v["wert_lbl"] = ttk.Label(card, text="Ziel")
+            v["wert_lbl"].grid(row=2, column=0, sticky="w", pady=2)
+            v["wert_entry"] = ttk.Entry(card, textvariable=v["wert"])
+            v["wert_entry"].grid(row=2, column=1, sticky="we", pady=2)
+            v["browse"] = ttk.Button(card, text="Durchsuchen …", command=lambda i=i: self.deck_browse(i))
+            v["browse"].grid(row=2, column=2, columnspan=2, sticky="w", padx=(6, 0))
+            ttk.Label(card, text="Vorlage").grid(row=3, column=0, sticky="w", pady=2)
+            pcb = ttk.Combobox(card, textvariable=v["preset"], values=presets, state="readonly", width=28)
+            pcb.grid(row=3, column=1, columnspan=3, sticky="we", pady=2)
             pcb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_preset(i))
-            ttk.Label(card, text="Name").grid(row=1, column=0, sticky="w", pady=2)
-            ttk.Entry(card, textvariable=v["name"], width=26).grid(row=1, column=1, columnspan=3, sticky="we", pady=2)
-            ttk.Label(card, text="Symbol").grid(row=2, column=0, sticky="w", pady=2)
-            icb = ttk.Combobox(card, textvariable=v["icon"], values=icons, state="readonly", width=18)
-            icb.grid(row=2, column=1, sticky="w", pady=2)
+            ttk.Label(card, text="Name auf dem Display").grid(row=4, column=0, sticky="w", pady=2)
+            ttk.Entry(card, textvariable=v["name"]).grid(row=4, column=1, columnspan=3, sticky="we", pady=2)
+            ttk.Label(card, text="Symbol").grid(row=5, column=0, sticky="w", pady=2)
+            icb = ttk.Combobox(card, textvariable=v["icon"], values=icons, state="readonly", width=22)
+            icb.grid(row=5, column=1, sticky="w", pady=2)
             icb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_sync(i))
             v["preview"] = tk.Label(card, text="·", width=2, relief="groove", bg="#f4f4f4")
-            v["preview"].grid(row=2, column=2, padx=4)
-            ttk.Label(card, text="Bild").grid(row=3, column=0, sticky="w", pady=2)
-            ttk.Entry(card, textvariable=v["bild"], width=18).grid(row=3, column=1, sticky="we", pady=2)
-            ttk.Button(card, text="…", width=3, command=lambda i=i: self.deck_bild(i)).grid(row=3, column=2, padx=2)
-            ttk.Button(card, text="X", width=3, command=lambda i=i: self.deck_bild_clear(i)).grid(row=3, column=3)
-            ttk.Label(card, text="Aktion").grid(row=4, column=0, sticky="w", pady=2)
-            acb = ttk.Combobox(card, textvariable=v["aktion"], values=actions, state="readonly", width=24)
-            acb.grid(row=4, column=1, columnspan=3, sticky="we", pady=2)
-            acb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_sync(i))
-            v["wert_lbl"] = ttk.Label(card, text="Kürzel")
-            v["wert_lbl"].grid(row=5, column=0, sticky="w", pady=2)
-            v["wert_entry"] = ttk.Entry(card, textvariable=v["wert"], width=18)
-            v["wert_entry"].grid(row=5, column=1, sticky="we", pady=2)
-            v["browse"] = ttk.Button(card, text="…", width=3, command=lambda i=i: self.deck_browse(i))
-            v["browse"].grid(row=5, column=2, padx=2)
+            v["preview"].grid(row=5, column=2, padx=6)
+            ttk.Label(card, text="Eigenes Bild").grid(row=6, column=0, sticky="w", pady=2)
+            ttk.Entry(card, textvariable=v["bild"]).grid(row=6, column=1, sticky="we", pady=2)
+            ttk.Button(card, text="…", width=3, command=lambda i=i: self.deck_bild(i)).grid(row=6, column=2, padx=(6, 2))
+            ttk.Button(card, text="X", width=3, command=lambda i=i: self.deck_bild_clear(i)).grid(row=6, column=3)
             card.columnconfigure(1, weight=1)
+            v["name"].trace_add("write", lambda *_i, i=i: self.deck_sync(i))
+            v["wert"].trace_add("write", lambda *_i, i=i: self.deck_sync(i))
             self.deck_sync(i)
-        grid.columnconfigure(0, weight=1); grid.columnconfigure(1, weight=1)
-        ttk.Label(f, foreground="#555", wraplength=700, justify="left", text=
-                  "Kürzel wie bei den G-Tasten, zum Beispiel CTRL+C, STRG+V, DEL, ALT+TAB, WIN+D, PLAYPAUSE. "
-                  "Bei „Text einfügen“ wird \\n zu Enter. Ein eigenes Bild ersetzt das Symbol (png, jpg, ico).").pack(anchor="w", pady=(8, 0))
+        ttk.Label(inner, foreground="#555", wraplength=740, justify="left", text=
+                  "Beispiele für das Ziel: CTRL+C, STRG+V, DEL, ALT+TAB, WIN+D, PLAYPAUSE, explorer.exe oder eine Webadresse. "
+                  "Bei „Text einfügen“ wird \\n zu Enter. Speichern, dann am Display auf „Stream Deck“ wechseln.").pack(anchor="w", fill="x", padx=2, pady=(4, 8))
     def deck_preset(self, i):
         name = self.deck_vars[i]["preset"].get()
         p = g19_deck.PRESET_BY_NAME.get(name)
@@ -288,6 +303,15 @@ class App(tk.Tk):
         v["wert_lbl"].config(text=g19_deck.WERT_LABEL.get(aid, "Ziel"))
         v["wert_entry"].config(state="disabled" if aid == "keine" else "normal")
         v["browse"].config(state="normal" if aid in ("programm", "ordner") else "disabled")
+        wert = v["wert"].get().strip()
+        akt = v["aktion"].get()
+        if aid == "keine":
+            text = "Macht nichts"
+        elif wert:
+            text = f"Macht: {akt}  →  {wert}"
+        else:
+            text = f"Macht: {akt}  (noch kein Ziel)"
+        if "summary" in v: v["summary"].config(text=text)
     def deck_bild(self, i):
         p = filedialog.askopenfilename(title="Symbolbild", filetypes=[("Bilder", "*.png *.jpg *.jpeg *.bmp *.gif *.ico *.webp"), ("Alle Dateien", "*.*")])
         if p: self.deck_vars[i]["bild"].set(os.path.normpath(p))
