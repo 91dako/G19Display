@@ -101,6 +101,25 @@ def fit(d, text, f, maxw):
     while text and d.textlength(text + "…", font=f) > maxw: text = text[:-1]
     return text + "…"
 
+banner = {"k": "", "t": 0}
+def marquee(img, d, x, y, text, f, maxw, fill):
+    """Laufbanner, wenn der Text nicht in die Breite passt. Kurzer Text bleibt stehen."""
+    tw = d.textlength(text, font=f)
+    if tw <= maxw:
+        d.text((x, y), text, font=f, fill=fill); return
+    gap, speed, hold = 40, 26, 1.6
+    cycle = tw + gap
+    now = time.time()
+    if banner["k"] != text: banner["k"], banner["t"] = text, now
+    gone = now - banner["t"]
+    off = 0 if gone < hold else ((gone - hold) * speed) % cycle
+    ascent, descent = f.getmetrics()
+    strip = Image.new("RGB", (int(maxw), ascent + descent + 2))
+    sd = ImageDraw.Draw(strip)
+    sd.text((-off, 0), text, font=f, fill=fill)
+    sd.text((-off + cycle, 0), text, font=f, fill=fill)
+    img.paste(strip, (int(x), int(y)))
+
 def title(d, t):
     d.text((12, 6), t, font=F18, fill=BLUE)
     d.text((W-12, 6), st["mode"], font=F18, fill=YEL, anchor="ra")
@@ -148,6 +167,21 @@ def wetter_thread():
             data["wetter"] = r; ev_wetter.clear(); ev_wetter.wait(900)
         except Exception: ev_wetter.clear(); ev_wetter.wait(120)
 
+def _timeline(tl):
+    """Position und Ende relativ zum Start. last_updated ist der Zeitpunkt, zu dem pos galt."""
+    if not tl: return 0.0, 0.0, None
+    pos, end, start = tl.position.total_seconds(), tl.end_time.total_seconds(), tl.start_time.total_seconds()
+    if pos >= start: pos -= start
+    end = end - start if end >= start else 0.0
+    lu = None
+    try:
+        dt = tl.last_updated_time
+        if dt and dt.year >= 2000:
+            if dt.tzinfo is None: dt = dt.replace(tzinfo=datetime.timezone.utc)
+            lu = dt.timestamp()
+    except Exception: lu = None
+    return max(0.0, pos), max(0.0, end), lu
+
 def musik_thread():
     try:
         from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as MGR
@@ -162,12 +196,35 @@ def musik_thread():
                     p = await s.try_get_media_properties_async()
                     pb = s.get_playback_info(); tl = s.get_timeline_properties()
                     app = (s.source_app_user_model_id or "").split("!")[0].split("\\")[-1].replace(".exe","")
-                    data["musik"] = {"titel": p.title or "", "kuenstler": p.artist or "", "album": p.album_title or "",
-                                     "spielt": int(pb.playback_status) == 4, "app": app,
-                                     "pos": tl.position.total_seconds() if tl else 0, "ende": tl.end_time.total_seconds() if tl else 0,
-                                     "t": time.time()}
+                    pos, end, lu = _timeline(tl)
+                    spielt = int(pb.playback_status) == 4
+                    rate = 1.0
+                    try:
+                        pr = pb.playback_rate
+                        if pr: rate = float(pr) or 1.0
+                    except Exception: pass
+                    if rate <= 0: rate = 1.0
+                    now = time.time()
+                    titel, kuenstler = p.title or "", p.artist or ""
+                    prev = data["musik"]
+                    same = bool(prev and prev.get("titel") == titel and prev.get("kuenstler") == kuenstler and titel)
+                    base_pos, base_t = pos, (lu if lu else now)
+                    # Chrome/YouTube meldet beim Abspielen oft Position 0 und frischt nur den
+                    # Zeitstempel auf. Echte Sprünge (Pause, Vorspulen) bleiben gültig.
+                    if same:
+                        est = prev["pos"] + ((now - prev["t"]) * (prev.get("rate") or 1) if prev.get("spielt") else 0)
+                        live = pos + ((now - lu) * rate if spielt and lu else 0)
+                        if spielt and pos < 1.5 and est > live + 0.35:
+                            base_pos, base_t = est, now
+                        elif spielt and lu:
+                            base_pos, base_t = pos, lu
+                        else:
+                            base_pos, base_t = pos, now
+                    data["musik"] = {"titel": titel, "kuenstler": kuenstler, "album": p.album_title or "",
+                                     "spielt": spielt, "app": app, "rate": rate,
+                                     "pos": max(0.0, base_pos), "ende": end, "t": base_t}
             except Exception: data["musik"] = None
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
     asyncio.run(poll())
 
 def kal_thread():
@@ -231,10 +288,14 @@ def v_musik(d, img):
     title(d, "Musik"); m = data["musik"]
     if not m or not m["titel"]:
         d.text((W//2, 125), "Gerade läuft nichts", font=F22, fill=GREY, anchor="mm"); return
-    d.text((16, 50), fit(d, m["titel"], F28, 290), font=F28, fill=WHITE)
+    marquee(img, d, 16, 50, m["titel"], F28, 288, WHITE)
     d.text((16, 92), fit(d, m["kuenstler"], F22, 290), font=F22, fill=BLUE)
     d.text((16, 122), fit(d, m["album"], F18, 290), font=F18, fill=GREY)
-    pos = m["pos"] + ((time.time() - m["t"]) if m["spielt"] else 0)
+    pos = m["pos"]
+    if m["spielt"]:
+        dt = time.time() - m["t"]
+        if 0 <= dt <= 8 * 3600: pos += dt * (m.get("rate") or 1)
+    if pos < 0: pos = 0
     if m["ende"] > 0:
         pos = min(pos, m["ende"])
         d.rectangle((16, 170, 304, 178), outline=(90,90,90))
@@ -461,7 +522,8 @@ def lcd_loop():
             try: usb.util.dispose_resources(lcd["dev"])
             except Exception: pass
             lcd["dev"] = None; time.sleep(3); continue
-        time.sleep(0.25 - (time.time() % 0.25))
+        step = 0.1 if cur_view() == "Musik" else 0.25
+        time.sleep(step - (time.time() % step))
 
 # ---------- G-/M-Tasten (SendInput) ----------
 VK = {"CTRL":0x11,"LCTRL":0xA2,"RCTRL":0xA3,"SHIFT":0x10,"LSHIFT":0xA0,"RSHIFT":0xA1,"ALT":0x12,"LALT":0xA4,"RALT":0xA5,
