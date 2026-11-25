@@ -6,7 +6,8 @@
     {"name": "System", "aktiv": true},
     {"name": "Wetter", "aktiv": true},
     {"name": "Bilder", "aktiv": true},
-    {"name": "Kalender", "aktiv": true}
+    {"name": "Kalender", "aktiv": true},
+    {"name": "Stream Deck", "aktiv": true}
   ],
   "bilder_ordner": "C:\\Users\\<NAME>\\Pictures",
   "bilder_intervall": 10,
@@ -26,5 +27,11 @@
     "absender_anzeigen": true,
     "text_anzeigen": false,
     "fenster_sichtbar": false
-  }
+  },
+  "streamdeck": [
+    {"taste": "G1", "name": "Kopieren", "icon": "kopieren", "bild": "", "aktion": "taste", "wert": "CTRL+C"},
+    {"taste": "G7", "name": "Einfügen", "icon": "einfuegen", "bild": "", "aktion": "taste", "wert": "CTRL+V"},
+    {"taste": "G2", "name": "Ausschneiden", "icon": "ausschneiden", "bild": "", "aktion": "taste", "wert": "CTRL+X"},
+    {"taste": "G8", "name": "Löschen", "icon": "loeschen", "bild": "", "aktion": "taste", "wert": "DEL"}
+  ]
 }

@@ -7,6 +7,9 @@ from tkinter import ttk, messagebox, filedialog, colorchooser
 import psutil, requests
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+if BASE not in sys.path:
+    sys.path.insert(0, BASE)
+import g19_deck
 CFG_PATH = os.path.join(BASE, "einstellungen.json")
 KEYS_PATH = os.path.join(BASE, "tasten.json")
 KAL_TXT = os.path.join(BASE, "kalender_url.txt")
@@ -17,7 +20,7 @@ WA_PROFILE = os.path.join(BASE, "whatsapp_profil")
 HELPER = os.path.join(BASE, "g19_display.py")
 PYW = sys.executable.replace("python.exe", "pythonw.exe")
 NOWIN = 0x08000000
-ALL_VIEWS = ["Uhr", "Musik", "Netzwerk", "System", "Wetter", "Bilder", "Kalender"]
+ALL_VIEWS = ["Uhr", "Musik", "Netzwerk", "System", "Wetter", "Bilder", "Kalender", "Stream Deck"]
 def default_pics():
     home = os.path.expanduser("~")
     for p in (os.path.join(home, "Pictures"), os.path.join(home, "Bilder")):
@@ -32,6 +35,7 @@ DEFAULTS = {
     "helligkeit_setzen": False, "helligkeit": 100,
     "tastatur_farbe_setzen": False, "tastatur_farbe": "#FFFFFF",
     "whatsapp": {"aktiv": False, "dauer": 3, "absender_anzeigen": True, "text_anzeigen": False, "fenster_sichtbar": False},
+    "streamdeck": g19_deck.fresh_slots(),
 }
 WA_TEXT = {"warte_auf_qr": "Warte auf QR-Code-Scan im Browserfenster …", "angemeldet_sync": "Angemeldet – synchronisiere …",
            "angemeldet": "Angemeldet ✓ (Überwachung startet gleich)", "verbunden": "Verbunden ✓ – überwacht neue Nachrichten",
@@ -65,7 +69,7 @@ def procs(name):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("G19 Einstellungen"); self.geometry("620x560"); self.minsize(560, 500)
+        self.title("G19 Einstellungen"); self.geometry("760x700"); self.minsize(720, 640)
         ico = os.path.join(BASE, "g19_einstellungen.ico")
         if os.path.exists(ico):
             try: self.iconbitmap(ico)
@@ -79,8 +83,8 @@ class App(tk.Tk):
         self.keys = load_json(KEYS_PATH, {})
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True, padx=8, pady=(8, 4))
         for title, fn in (("Ansichten", self.tab_views), ("Bilder", self.tab_pics), ("Wetter", self.tab_weather),
-                          ("Kalender", self.tab_cal), ("G-Tasten", self.tab_keys), ("Display", self.tab_display),
-                          ("WhatsApp", self.tab_wa)):
+                          ("Kalender", self.tab_cal), ("G-Tasten", self.tab_keys), ("Stream Deck", self.tab_deck),
+                          ("Display", self.tab_display), ("WhatsApp", self.tab_wa)):
             f = ttk.Frame(nb, padding=12); nb.add(f, text=title); fn(f)
         bot = ttk.Frame(self, padding=(8, 4, 8, 8)); bot.pack(fill="x")
         self.helper_lbl = ttk.Label(bot, text=""); self.helper_lbl.pack(side="left")
@@ -210,6 +214,95 @@ class App(tk.Tk):
     def mode_changed(self, *_):
         self.store_mode(); self.cur_mode = self.v_mode.get(); self.load_mode()
 
+    # ---------- Stream Deck ----------
+    def tab_deck(self, f):
+        ttk.Label(f, justify="left", wraplength=700, text=
+                  "Die oberen vier G-Tasten, so wie sie an der Tastatur sitzen: G1 und G7 in der ersten Reihe, "
+                  "G2 und G8 darunter. Auf dem Display erscheint das, sobald die Ansicht „Stream Deck“ gewählt ist. "
+                  "Die Aktionen gelten nur dort. Die übrigen G-Tasten behalten ihre normale Belegung.").pack(anchor="w")
+        grid = ttk.Frame(f); grid.pack(fill="both", expand=True, pady=(8, 0))
+        slots = g19_deck.normalize(self.cfg.get("streamdeck"))
+        self.deck_vars = []
+        icons = [i[1] for i in g19_deck.ICONS]
+        actions = [a[1] for a in g19_deck.AKTIONEN]
+        presets = ["Vorlage wählen …"] + [p[0] for p in g19_deck.PRESETS]
+        for i, slot in enumerate(slots):
+            v = {"name": tk.StringVar(value=slot["name"]),
+                 "icon": tk.StringVar(value=g19_deck.ICON_LABEL.get(slot["icon"], "Leer")),
+                 "bild": tk.StringVar(value=slot["bild"]),
+                 "aktion": tk.StringVar(value=g19_deck.AKTION_LABEL.get(slot["aktion"], "Keine Aktion")),
+                 "wert": tk.StringVar(value=slot["wert"]),
+                 "preset": tk.StringVar(value="Vorlage wählen …")}
+            self.deck_vars.append(v)
+            card = ttk.LabelFrame(grid, text=f"{slot['taste']}  ·  {g19_deck.ORT[slot['taste']]}", padding=8)
+            card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=4, pady=4)
+            ttk.Label(card, text="Vorlage").grid(row=0, column=0, sticky="w", pady=2)
+            pcb = ttk.Combobox(card, textvariable=v["preset"], values=presets, state="readonly", width=24)
+            pcb.grid(row=0, column=1, columnspan=3, sticky="we", pady=2)
+            pcb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_preset(i))
+            ttk.Label(card, text="Name").grid(row=1, column=0, sticky="w", pady=2)
+            ttk.Entry(card, textvariable=v["name"], width=26).grid(row=1, column=1, columnspan=3, sticky="we", pady=2)
+            ttk.Label(card, text="Symbol").grid(row=2, column=0, sticky="w", pady=2)
+            icb = ttk.Combobox(card, textvariable=v["icon"], values=icons, state="readonly", width=18)
+            icb.grid(row=2, column=1, sticky="w", pady=2)
+            icb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_sync(i))
+            v["preview"] = tk.Label(card, text="·", width=2, relief="groove", bg="#f4f4f4")
+            v["preview"].grid(row=2, column=2, padx=4)
+            ttk.Label(card, text="Bild").grid(row=3, column=0, sticky="w", pady=2)
+            ttk.Entry(card, textvariable=v["bild"], width=18).grid(row=3, column=1, sticky="we", pady=2)
+            ttk.Button(card, text="…", width=3, command=lambda i=i: self.deck_bild(i)).grid(row=3, column=2, padx=2)
+            ttk.Button(card, text="X", width=3, command=lambda i=i: self.deck_bild_clear(i)).grid(row=3, column=3)
+            ttk.Label(card, text="Aktion").grid(row=4, column=0, sticky="w", pady=2)
+            acb = ttk.Combobox(card, textvariable=v["aktion"], values=actions, state="readonly", width=24)
+            acb.grid(row=4, column=1, columnspan=3, sticky="we", pady=2)
+            acb.bind("<<ComboboxSelected>>", lambda e, i=i: self.deck_sync(i))
+            v["wert_lbl"] = ttk.Label(card, text="Kürzel")
+            v["wert_lbl"].grid(row=5, column=0, sticky="w", pady=2)
+            v["wert_entry"] = ttk.Entry(card, textvariable=v["wert"], width=18)
+            v["wert_entry"].grid(row=5, column=1, sticky="we", pady=2)
+            v["browse"] = ttk.Button(card, text="…", width=3, command=lambda i=i: self.deck_browse(i))
+            v["browse"].grid(row=5, column=2, padx=2)
+            card.columnconfigure(1, weight=1)
+            self.deck_sync(i)
+        grid.columnconfigure(0, weight=1); grid.columnconfigure(1, weight=1)
+        ttk.Label(f, foreground="#555", wraplength=700, justify="left", text=
+                  "Kürzel wie bei den G-Tasten, zum Beispiel CTRL+C, STRG+V, DEL, ALT+TAB, WIN+D, PLAYPAUSE. "
+                  "Bei „Text einfügen“ wird \\n zu Enter. Ein eigenes Bild ersetzt das Symbol (png, jpg, ico).").pack(anchor="w", pady=(8, 0))
+    def deck_preset(self, i):
+        name = self.deck_vars[i]["preset"].get()
+        p = g19_deck.PRESET_BY_NAME.get(name)
+        self.deck_vars[i]["preset"].set("Vorlage wählen …")
+        if not p: return
+        v = self.deck_vars[i]
+        v["name"].set("" if p[0] == "Leeren" else p[0].replace(" …", ""))
+        v["icon"].set(g19_deck.ICON_LABEL.get(p[1], "Leer"))
+        v["aktion"].set(g19_deck.AKTION_LABEL.get(p[2], "Keine Aktion"))
+        v["wert"].set(p[3])
+        self.deck_sync(i)
+    def deck_sync(self, i):
+        v = self.deck_vars[i]
+        spec = g19_deck.ICON_BY_ID.get(g19_deck.ICON_ID.get(v["icon"].get(), "leer"), g19_deck.ICON_BY_ID["leer"])
+        font = ("Segoe MDL2 Assets", 16) if spec[3] == "mdl2" else ("Segoe UI", 14)
+        v["preview"].config(text=spec[2] or "·", font=font)
+        aid = g19_deck.AKTION_ID.get(v["aktion"].get(), "keine")
+        v["wert_lbl"].config(text=g19_deck.WERT_LABEL.get(aid, "Ziel"))
+        v["wert_entry"].config(state="disabled" if aid == "keine" else "normal")
+        v["browse"].config(state="normal" if aid in ("programm", "ordner") else "disabled")
+    def deck_bild(self, i):
+        p = filedialog.askopenfilename(title="Symbolbild", filetypes=[("Bilder", "*.png *.jpg *.jpeg *.bmp *.gif *.ico *.webp"), ("Alle Dateien", "*.*")])
+        if p: self.deck_vars[i]["bild"].set(os.path.normpath(p))
+    def deck_bild_clear(self, i):
+        self.deck_vars[i]["bild"].set("")
+    def deck_browse(self, i):
+        aid = g19_deck.AKTION_ID.get(self.deck_vars[i]["aktion"].get(), "keine")
+        if aid == "programm":
+            p = filedialog.askopenfilename(title="Programm", filetypes=[("Programme", "*.exe *.lnk"), ("Alle Dateien", "*.*")])
+        elif aid == "ordner":
+            p = filedialog.askdirectory(title="Ordner")
+        else:
+            return
+        if p: self.deck_vars[i]["wert"].set(os.path.normpath(p))
+
     # ---------- Display ----------
     def tab_display(self, f):
         self.v_bs = tk.BooleanVar(value=self.cfg["helligkeit_setzen"]); self.v_b = tk.IntVar(value=int(self.cfg["helligkeit"]))
@@ -295,6 +388,14 @@ class App(tk.Tk):
         except Exception: dauer = 3
         c["whatsapp"] = {"aktiv": bool(self.v_wa.get()), "dauer": dauer, "absender_anzeigen": bool(self.v_wn.get()),
                          "text_anzeigen": bool(self.v_wt.get()), "fenster_sichtbar": bool(self.v_wf.get())}
+        deck = []
+        for taste, v in zip(g19_deck.DECK_KEYS, self.deck_vars):
+            akt = g19_deck.AKTION_ID.get(v["aktion"].get(), "keine")
+            wert = v["wert"].get().strip()
+            deck.append({"taste": taste, "name": v["name"].get().strip(),
+                         "icon": g19_deck.ICON_ID.get(v["icon"].get(), "leer"), "bild": v["bild"].get().strip(),
+                         "aktion": akt, "wert": wert.upper() if akt == "taste" else wert})
+        c["streamdeck"] = deck
         self.store_mode()
         return c
     def snapshot(self):

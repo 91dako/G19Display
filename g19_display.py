@@ -11,6 +11,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 VID, PID, W, H = 0x046D, 0xC229, 320, 240
 BASE = os.path.dirname(os.path.abspath(__file__))
+if BASE not in sys.path:
+    sys.path.insert(0, BASE)
+import g19_deck
 HEADER = bytes([0x10,0x0F,0x00,0x58,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x3F,0x01,0xEF,0x00,0x0F] + [i & 0xFF for i in range(16, 512)])
 TAGE = ["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"]
 KURZ = ["Mo","Di","Mi","Do","Fr","Sa","So"]
@@ -23,9 +26,9 @@ def _pics_default():
     return os.path.join(home, "Pictures")
 PICS = _pics_default()
 NVSMI = r"C:\Windows\System32\nvidia-smi.exe"
-ALL_VIEWS = ["Uhr", "Musik", "Netzwerk", "System", "Wetter", "Bilder", "Kalender"]
+ALL_VIEWS = ["Uhr", "Musik", "Netzwerk", "System", "Wetter", "Bilder", "Kalender", "Stream Deck"]
 VIEWS = list(ALL_VIEWS)          # aktive Ansichten in Reihenfolge (aus einstellungen.json)
-st = {"mode":"M1", "last":"", "last_t":0, "view":0, "menu_t":0, "pic_next":True, "wa_t":0, "wa_name":"", "wa_text":""}
+st = {"mode":"M1", "last":"", "last_t":0, "view":0, "menu_t":0, "pic_next":True, "wa_t":0, "wa_name":"", "wa_text":"", "deck_hit":("", 0)}
 NOWIN = 0x08000000
 
 # ---------- Log ----------
@@ -45,6 +48,7 @@ DEFAULTS = {
     "helligkeit_setzen": False, "helligkeit": 100,
     "tastatur_farbe_setzen": False, "tastatur_farbe": "#FFFFFF",
     "whatsapp": {"aktiv": False, "dauer": 3, "absender_anzeigen": True, "text_anzeigen": False, "fenster_sichtbar": False},
+    "streamdeck": g19_deck.fresh_slots(),
 }
 CFG = json.loads(json.dumps(DEFAULTS)); cfg_state = {"mtime": None}
 ev_wetter, ev_kal = threading.Event(), threading.Event()
@@ -304,6 +308,53 @@ def v_musik(d, img):
         d.text((16, 184), f(pos), font=F15, fill=GREY); d.text((304, 184), f(m["ende"]), font=F15, fill=GREY, anchor="ra")
     d.text((16, 212), ("> läuft" if m["spielt"] else "|| Pause") + (f"  ·  {m['app']}" if m["app"] else ""), font=F15, fill=YEL)
 
+_DECK_FONT, _DECK_IMG = {}, {}
+def deck_font(kind, size):
+    key = (kind, size)
+    if key not in _DECK_FONT:
+        try: _DECK_FONT[key] = ImageFont.truetype("segmdl2.ttf" if kind == "mdl2" else "segoeui.ttf", size)
+        except OSError: _DECK_FONT[key] = F22
+    return _DECK_FONT[key]
+def deck_photo(path, size):
+    if not path or not os.path.isfile(path): return None
+    try: mt = os.path.getmtime(path)
+    except OSError: return None
+    key = (path, mt, size)
+    if key in _DECK_IMG: return _DECK_IMG[key]
+    try:
+        im = ImageOps.fit(Image.open(path).convert("RGBA"), (size, size))
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+        im.putalpha(mask)
+        if len(_DECK_IMG) > 16: _DECK_IMG.clear()
+        _DECK_IMG[key] = im
+        return im
+    except Exception: return None
+
+def v_stream(d, img):
+    title(d, "Stream Deck")
+    slots = g19_deck.normalize(CFG.get("streamdeck"))
+    accents = ((0, 122, 204), (0, 164, 110), (230, 126, 34), (150, 80, 210))
+    gap, x0, y0, cw, ch = 8, 10, 40, 146, 91
+    hit_k, hit_t = st.get("deck_hit") or ("", 0)
+    now = time.time()
+    for i, s in enumerate(slots):
+        x, y = x0 + (i % 2) * (cw + gap), y0 + (i // 2) * (ch + gap)
+        hot = hit_k == s["taste"] and now - hit_t < 0.55
+        d.rounded_rectangle((x, y, x + cw, y + ch), radius=10, fill=(48, 56, 72) if hot else (26, 30, 38),
+                            outline=YEL if hot else accents[i], width=2)
+        d.text((x + 8, y + 3), s["taste"], font=F15, fill=GREY)
+        cx, cy = x + cw // 2, y + 42
+        photo = deck_photo(s.get("bild") or "", 36)
+        if photo is not None:
+            img.paste(photo, (cx - 18, cy - 18), photo)
+        else:
+            d.ellipse((cx - 16, cy - 16, cx + 16, cy + 16), fill=accents[i])
+            spec = g19_deck.ICON_BY_ID.get(s["icon"]) or g19_deck.ICON_BY_ID["leer"]
+            if spec[2]:
+                d.text((cx, cy), spec[2], font=deck_font(spec[3], 18), fill=WHITE, anchor="mm")
+        d.text((x + cw // 2, y + ch - 14), fit(d, s["name"] or "Leer", F15, cw - 16), font=F15, fill=WHITE, anchor="mm")
+
 def mbit(b): return b * 8 / 1_000_000
 def v_netz(d, img):
     title(d, "Netzwerk"); dn, up = data["net_now"]
@@ -376,7 +427,7 @@ def v_kal(d, img):
         d.text((146, y), fit(d, name, F15, 160), font=F15, fill=WHITE)
         y += 28
 
-RENDER = {"Uhr": v_uhr, "Musik": v_musik, "Netzwerk": v_netz, "System": v_system, "Wetter": v_wetter, "Bilder": v_bilder, "Kalender": v_kal}
+RENDER = {"Uhr": v_uhr, "Musik": v_musik, "Netzwerk": v_netz, "System": v_system, "Wetter": v_wetter, "Bilder": v_bilder, "Kalender": v_kal, "Stream Deck": v_stream}
 
 # ---------- WhatsApp-Popup ----------
 WA_GREEN = (37, 211, 102)
@@ -522,7 +573,7 @@ def lcd_loop():
             try: usb.util.dispose_resources(lcd["dev"])
             except Exception: pass
             lcd["dev"] = None; time.sleep(3); continue
-        step = 0.1 if cur_view() == "Musik" else 0.25
+        step = 0.1 if cur_view() in ("Musik", "Stream Deck") else 0.25
         time.sleep(step - (time.time() % step))
 
 # ---------- G-/M-Tasten (SendInput) ----------
@@ -545,7 +596,42 @@ def key(vk, up):
     flags = (0x0002 if up else 0) | (0x0001 if vk in EXT else 0)
     inp = INPUT(type=1, u=_U(ki=KEYBDINPUT(vk, user32.MapVirtualKeyW(vk, 0), flags, 0, 0)))
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-def parse(spec): return [VK[p.strip().upper()] for p in str(spec).split("+") if p.strip().upper() in VK]
+def parse(spec):
+    alias = {"STRG": "CTRL", "UMSCHALT": "SHIFT", "EINGABE": "ENTER", "ENTF": "DEL", "LOESCHEN": "DEL", "LÖSCHEN": "DEL", "LEERTASTE": "SPACE"}
+    out = []
+    for p in str(spec).split("+"):
+        p = alias.get(p.strip().upper(), p.strip().upper())
+        if p in VK: out.append(VK[p])
+    return out
+def tap(vks):
+    for v in vks: key(v, False)
+    time.sleep(0.04)
+    for v in reversed(vks): key(v, True)
+def type_text(text):
+    for ch in str(text).replace("\\n", "\n").replace("\\t", "\t")[:400]:
+        if ch in "\r\n": tap([VK["ENTER"]]); continue
+        if ch == "\t": tap([VK["TAB"]]); continue
+        code = ord(ch)
+        if code > 0xFFFF: continue
+        down = INPUT(type=1, u=_U(ki=KEYBDINPUT(0, code, 0x0004, 0, 0)))
+        up = INPUT(type=1, u=_U(ki=KEYBDINPUT(0, code, 0x0004 | 0x0002, 0, 0)))
+        user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(INPUT))
+        user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(INPUT))
+def open_target(wert, web=False):
+    wert = os.path.expandvars(str(wert).strip().strip('"'))
+    if not wert: return
+    if web and "://" not in wert: wert = "https://" + wert
+    try: os.startfile(wert)
+    except OSError: subprocess.Popen([wert], creationflags=NOWIN)
+def run_deck(name):
+    slot = next((s for s in g19_deck.normalize(CFG.get("streamdeck")) if s["taste"] == name), None)
+    if not slot: return
+    akt, wert = slot["aktion"], slot["wert"]
+    log.info("Stream Deck %s → %s", name, slot["name"] or akt)
+    if akt == "taste": tap(parse(wert))
+    elif akt in ("programm", "ordner"): open_target(wert)
+    elif akt == "web": open_target(wert, web=True)
+    elif akt == "text": type_text(wert)
 def load_cfg():
     try:
         with open(os.path.join(BASE, "tasten.json"), encoding="utf-8-sig") as f: return json.load(f)
@@ -575,9 +661,15 @@ def keys_thread():
                 for g in range(12):
                     b = 1 << g; name = f"G{g+1}"
                     if down & b:
-                        spec = cfg.get(st["mode"], {}).get(name, ""); vks = parse(spec)
-                        for v in vks: key(v, False)
-                        held[name] = vks; st["last"], st["last_t"] = f"{name} → {spec or '-'}", time.time()
+                        if cur_view() == "Stream Deck" and name in g19_deck.DECK_KEYS:
+                            st["deck_hit"] = (name, time.time())
+                            try: run_deck(name)
+                            except Exception as e: log.info("Stream Deck %s: %s", name, e)
+                            held[name] = []
+                        else:
+                            spec = cfg.get(st["mode"], {}).get(name, ""); vks = parse(spec)
+                            for v in vks: key(v, False)
+                            held[name] = vks; st["last"], st["last_t"] = f"{name} → {spec or '-'}", time.time()
                     if up & b:
                         for v in reversed(held.pop(name, [])): key(v, True)
         except Exception:
